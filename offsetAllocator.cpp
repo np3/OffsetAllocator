@@ -357,7 +357,7 @@ namespace OffsetAllocator
     uint32 Allocator::insertNodeIntoBin(uint32 size, uint32 dataOffset)
     {
         // Round down to bin index to ensure that bin >= alloc
-        uint32 binIndex = SmallFloat::uintToFloatRoundDown(size);
+        uint32 binIndex = SmallFloat::uintToFloatRoundUp(size);
         
         uint32 topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT;
         uint32 leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;
@@ -403,7 +403,7 @@ namespace OffsetAllocator
             // Hard case: We are the first node in a bin. Find the bin.
             
             // Round down to bin index to ensure that bin >= alloc
-            uint32 binIndex = SmallFloat::uintToFloatRoundDown(node.dataSize);
+            uint32 binIndex = SmallFloat::uintToFloatRoundUp(node.dataSize);
             
             uint32 topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT;
             uint32 leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;
