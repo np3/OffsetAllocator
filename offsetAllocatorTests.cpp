@@ -256,5 +256,16 @@ namespace offsetAllocatorTests
             REQUIRE(validateAll.offset == 0);
             allocator.free(validateAll);
         }
+        SECTION("freespace - bin selection");
+        {
+            OffsetAllocator::Allocator alloc(256+68);
+
+            OffsetAllocator::Allocation a = alloc.allocate(255);
+            REQUIRE(a.offset != OffsetAllocator::Allocation::NO_SPACE);
+            OffsetAllocator::StorageReport report = alloc.storageReport();
+            REQUIRE(report.totalFreeSpace > 67);
+            OffsetAllocator::Allocation b = alloc.allocate(67);
+            REQUIRE(b.offset != OffsetAllocator::Allocation::NO_SPACE);
+        }
     }
 }
