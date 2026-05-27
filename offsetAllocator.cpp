@@ -218,11 +218,37 @@ namespace OffsetAllocator
         
         uint32 topBinIndex = minTopBinIndex;
         uint32 leafBinIndex = Allocation::NO_SPACE;
+        uint32 chosenNodeIndex = Node::unused;
 
         // If top bin exists, scan its leaf bin. This can fail (NO_SPACE).
         if (m_usedBinsTop & (1 << topBinIndex))
         {
             leafBinIndex = findLowestSetBitAfter(m_usedBins[topBinIndex], minLeafBinIndex);
+        }
+
+        // Fallback: if no leaf >= minLeaf in this top bin, try the immediate lower leaf (minLeaf-1)
+        // This handles cases where a remainder rounded down into the previous leaf still has actual size >= request.
+        if (leafBinIndex == Allocation::NO_SPACE && (m_usedBinsTop & (1 << minTopBinIndex)))
+        {
+            if (minLeafBinIndex > 0)
+            {
+                uint32 lowerLeaf = minLeafBinIndex - 1;
+                if (m_usedBins[minTopBinIndex] & (1 << lowerLeaf))
+                {
+                    uint32 binIndexLower = (minTopBinIndex << TOP_BINS_INDEX_SHIFT) | lowerLeaf;
+                    uint32 it = m_binIndices[binIndexLower];
+                    while (it != Node::unused && m_nodes[it].dataSize < size)
+                    {
+                        it = m_nodes[it].binListNext;
+                    }
+                    if (it != Node::unused)
+                    {
+                        topBinIndex = minTopBinIndex;
+                        leafBinIndex = lowerLeaf;
+                        chosenNodeIndex = it;
+                    }
+                }
+            }
         }
     
         // If we didn't find space in top bin, we search top bin from +1
@@ -243,14 +269,39 @@ namespace OffsetAllocator
                 
         uint32 binIndex = (topBinIndex << TOP_BINS_INDEX_SHIFT) | leafBinIndex;
         
-        // Pop the top node of the bin. Bin top = node.next.
-        uint32 nodeIndex = m_binIndices[binIndex];
+        uint32 nodeIndex;
+        if (chosenNodeIndex != Node::unused)
+        {
+            nodeIndex = chosenNodeIndex;
+            Node &n = m_nodes[nodeIndex];
+            // Unlink selected node from the bin list
+            if (n.binListPrev != Node::unused)
+            {
+                m_nodes[n.binListPrev].binListNext = n.binListNext;
+            }
+            else
+            {
+                // Selected node was the head
+                m_binIndices[binIndex] = n.binListNext;
+            }
+            if (n.binListNext != Node::unused)
+            {
+                m_nodes[n.binListNext].binListPrev = n.binListPrev;
+            }
+        }
+        else
+        {
+            // Pop head: Bin top = node.next.
+            nodeIndex = m_binIndices[binIndex];
+            uint32 nextIndex = m_nodes[nodeIndex].binListNext;
+            m_binIndices[binIndex] = nextIndex;
+            if (nextIndex != Node::unused) m_nodes[nextIndex].binListPrev = Node::unused;
+        }
+
         Node& node = m_nodes[nodeIndex];
         uint32 nodeTotalSize = node.dataSize;
         node.dataSize = size;
         node.used = true;
-        m_binIndices[binIndex] = node.binListNext;
-        if (node.binListNext != Node::unused) m_nodes[node.binListNext].binListPrev = Node::unused;
         m_freeStorage -= nodeTotalSize;
 #ifdef DEBUG_VERBOSE
         printf("Free storage: %u (-%u) (allocate)\n", m_freeStorage, nodeTotalSize);
@@ -270,6 +321,7 @@ namespace OffsetAllocator
             }
         }
         
+        ASSERT(nodeTotalSize >= size);
         // Push back reminder N elements to a lower bin
         uint32 reminderSize = nodeTotalSize - size;
         if (reminderSize > 0)
@@ -356,8 +408,8 @@ namespace OffsetAllocator
 
     uint32 Allocator::insertNodeIntoBin(uint32 size, uint32 dataOffset)
     {
-        // Round up to bin index to ensure that bin >= alloc
-        uint32 binIndex = SmallFloat::uintToFloatRoundUp(size);
+        // Round down for free nodes: ensures node size >= bin representative and allocs (round up) will fit
+        uint32 binIndex = SmallFloat::uintToFloatRoundDown(size);
         
         uint32 topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT;
         uint32 leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;
@@ -402,8 +454,8 @@ namespace OffsetAllocator
         {
             // Hard case: We are the first node in a bin. Find the bin.
             
-            // Round up to bin index to ensure that bin >= alloc
-            uint32 binIndex = SmallFloat::uintToFloatRoundUp(node.dataSize);
+            // Use the same mapping as insertion (round down)
+            uint32 binIndex = SmallFloat::uintToFloatRoundDown(node.dataSize);
             
             uint32 topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT;
             uint32 leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK;
@@ -484,3 +536,4 @@ namespace OffsetAllocator
         return report;
     }
 }
+
